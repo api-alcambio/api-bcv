@@ -1,8 +1,7 @@
-﻿import re, time, os
+﻿import re, time
 from datetime import datetime
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -20,59 +19,45 @@ def get_driver():
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
+    opts.add_argument("--disable-software-rasterizer")
+    opts.add_argument("--disable-extensions")
+    opts.add_argument("--disable-images")
     opts.add_argument("--window-size=1920,1080")
     opts.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-    
-    # Configuración para Render/Linux
     opts.binary_location = "/usr/bin/chromium"
-    opts.add_argument("--disable-setuid-sandbox")
-    opts.add_argument("--remote-debugging-port=9222")
-    
     service = Service("/usr/bin/chromedriver")
     return webdriver.Chrome(service=service, options=opts)
 
 def extraer():
     driver = None
-    tasas = {
-        "USD": {"tasa": 0.0, "nombre": "Dolar", "simbolo": "$"},
-        "EUR": {"tasa": 0.0, "nombre": "Euro", "simbolo": "E"},
-        "CNY": {"tasa": 0.0, "nombre": "Yuan", "simbolo": "Y"},
-        "TRY": {"tasa": 0.0, "nombre": "Lira", "simbolo": "L"},
-        "RUB": {"tasa": 0.0, "nombre": "Rublo", "simbolo": "R"}
-    }
+    usd, eur = 0.0, 0.0
     fecha = None
     try:
-        print("Iniciando Chrome...")
-        driver = get_driver()
-        driver.set_page_load_timeout(30)
         print("Cargando BCV...")
+        driver = get_driver()
+        driver.set_page_load_timeout(20)
         driver.get(BCV_URL)
-        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        time.sleep(3)
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        time.sleep(2)
         html = driver.page_source
-        try:
-            texto = driver.execute_script("return document.body.innerText") or ""
-        except:
-            texto = ""
-        contenido = html + texto
-        print("Buscando tasas...")
-        for codigo in tasas:
-            match = re.search(rf'{codigo}\s*[:\s]*\s*(\d+(?:[.,]\d+)?)', contenido, re.IGNORECASE)
-            if match:
-                tasas[codigo]["tasa"] = float(match.group(1).replace(",", "."))
-                print(f"  {codigo}: {tasas[codigo]['tasa']}")
-        match_fecha = re.search(r'Fecha\s+Valor[:\s]+([A-Za-záéíóúñÁÉÍÓÚÑ]+,?\s*\d{1,2}\s+[A-Za-záéíóúñÁÉÍÓÚÑ]+\s+\d{4})', contenido, re.IGNORECASE)
-        if match_fecha:
-            fecha = match_fecha.group(1)
-        print("OK!")
+        
+        m_usd = re.search(r'USD\s*[:\s]*\s*(\d+(?:[.,]\d+)?)', html, re.IGNORECASE)
+        if m_usd: usd = float(m_usd.group(1).replace(",", "."))
+        
+        m_eur = re.search(r'EUR\s*[:\s]*\s*(\d+(?:[.,]\d+)?)', html, re.IGNORECASE)
+        if m_eur: eur = float(m_eur.group(1).replace(",", "."))
+        
+        m_fecha = re.search(r'Fecha\s+Valor[:\s]+([A-Za-záéíóúñÁÉÍÓÚÑ]+,?\s*\d{1,2}\s+[A-Za-záéíóúñÁÉÍÓÚÑ]+\s+\d{4})', html, re.IGNORECASE)
+        if m_fecha: fecha = m_fecha.group(1)
+        print(f"USD: {usd}, EUR: {eur}")
     except Exception as e:
         print(f"ERROR: {e}")
-        fecha = f"Error: {str(e)}"
+        fecha = f"Error: {str(e)[:80]}"
     finally:
         if driver:
             try: driver.quit()
             except: pass
-    return tasas, fecha
+    return usd, eur, fecha
 
 _cache = {"data": None, "ts": 0}
 
@@ -81,32 +66,37 @@ def obtener(cache=True):
     now = t.time()
     if cache and _cache["data"] and (now - _cache["ts"] < 3600):
         return _cache["data"]
-    tasas, fecha = extraer()
-    _cache["data"] = (tasas, fecha)
+    usd, eur, fecha = extraer()
+    _cache["data"] = (usd, eur, fecha)
     _cache["ts"] = now
-    return tasas, fecha
+    return usd, eur, fecha
 
 @app.get("/")
 def info():
-    return {"api": "API BCV", "version": "1.0.0", "endpoints": ["/tasas", "/dolar", "/euro", "/health"]}
+    return {"api": "API BCV", "version": "1.0.0", "endpoints": ["/tasas", "/dolar", "/euro"]}
 
 @app.get("/tasas")
 def get_tasas(cache: bool = Query(True)):
-    tasas, fecha = obtener(cache)
-    lista = [{"codigo": c, "nombre": i["nombre"], "tasa": i["tasa"], "simbolo": i["simbolo"]} for c, i in tasas.items()]
-    return {"fuente": "BCV", "fecha_valor": fecha, "fecha_consulta": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "tasas": lista}
+    usd, eur, fecha = obtener(cache)
+    return {
+        "fuente": "BCV",
+        "fecha_valor": fecha,
+        "fecha_consulta": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "tasas": [
+            {"codigo": "USD", "nombre": "Dolar", "tasa": usd},
+            {"codigo": "EUR", "nombre": "Euro", "tasa": eur}
+        ]
+    }
 
 @app.get("/dolar")
 def get_dolar(cache: bool = Query(True)):
-    tasas, fecha = obtener(cache)
-    i = tasas["USD"]
-    return {"codigo": "USD", "nombre": i["nombre"], "tasa": i["tasa"], "simbolo": i["simbolo"], "fecha_valor": fecha}
+    usd, _, fecha = obtener(cache)
+    return {"codigo": "USD", "nombre": "Dolar", "tasa": usd, "fecha_valor": fecha}
 
 @app.get("/euro")
 def get_euro(cache: bool = Query(True)):
-    tasas, fecha = obtener(cache)
-    i = tasas["EUR"]
-    return {"codigo": "EUR", "nombre": i["nombre"], "tasa": i["tasa"], "simbolo": i["simbolo"], "fecha_valor": fecha}
+    _, eur, fecha = obtener(cache)
+    return {"codigo": "EUR", "nombre": "Euro", "tasa": eur, "fecha_valor": fecha}
 
 @app.get("/health")
 def health():
