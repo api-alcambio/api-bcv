@@ -1,4 +1,4 @@
-﻿import re, time
+﻿import re, time, os
 from datetime import datetime
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,8 +23,12 @@ def get_driver():
     opts.add_argument("--window-size=1920,1080")
     opts.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
     
-    # Usar chromedriver del PATH o de C:\Windows\chromedriver.exe
-    service = Service(r"C:\api-bcv\chromedriver.exe")
+    # Configuración para Render/Linux
+    opts.binary_location = "/usr/bin/chromium"
+    opts.add_argument("--disable-setuid-sandbox")
+    opts.add_argument("--remote-debugging-port=9222")
+    
+    service = Service("/usr/bin/chromedriver")
     return webdriver.Chrome(service=service, options=opts)
 
 def extraer():
