@@ -4,6 +4,10 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 from bs4 import BeautifulSoup
+import urllib3
+
+# Desactivar warnings de SSL para el sitio del BCV que tiene certificado inválido
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = FastAPI(title="API BCV", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -15,22 +19,37 @@ def extraer():
     try:
         print("Consultando BCV...")
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        resp = requests.get(BCV_URL, headers=headers, timeout=15)
+        resp = requests.get(BCV_URL, headers=headers, timeout=15, verify=False)
         resp.raise_for_status()
         
         soup = BeautifulSoup(resp.text, "html.parser")
-        texto = soup.get_text()
         html = resp.text
-        contenido = texto + html
         
-        m_usd = re.search(r'USD\s*[:\s]*\s*(\d+(?:[.,]\d+)?)', contenido, re.IGNORECASE)
-        if m_usd: usd = float(m_usd.group(1).replace(",", "."))
+        # Buscar valores en el HTML - el BCV usa formato español (coma como decimal)
+        # Ejemplo: 462,66870000
+        patron_numero = r'(\d{1,3}(?:\.\d{3})*,\d+)'
         
-        m_eur = re.search(r'EUR\s*[:\s]*\s*(\d+(?:[.,]\d+)?)', contenido, re.IGNORECASE)
-        if m_eur: eur = float(m_eur.group(1).replace(",", "."))
+        # Buscar USD - usualmente aparece junto a "DÓLAR" o en el bloque del dólar
+        m_usd = re.search(r'USD[^>]*>.*?' + patron_numero, html, re.IGNORECASE | re.DOTALL)
+        if not m_usd:
+            # Intentar buscando por la palabra Dólar
+            m_usd = re.search(r'D[oó]lar[^<]*</[^>]*>.*?' + patron_numero, html, re.IGNORECASE | re.DOTALL)
+        if m_usd:
+            valor = m_usd.group(1).replace('.', '').replace(',', '.')
+            usd = float(valor)
         
-        m_fecha = re.search(r'Fecha\s+Valor[:\s]+([A-Za-záéíóúñÁÉÍÓÚÑ]+,?\s*\d{1,2}\s+[A-Za-záéíóúñÁÉÍÓÚÑ]+\s+\d{4})', contenido, re.IGNORECASE)
-        if m_fecha: fecha = m_fecha.group(1)
+        # Buscar EUR - Euro
+        m_eur = re.search(r'EUR[^>]*>.*?' + patron_numero, html, re.IGNORECASE | re.DOTALL)
+        if not m_eur:
+            m_eur = re.search(r'Euro[^<]*</[^>]*>.*?' + patron_numero, html, re.IGNORECASE | re.DOTALL)
+        if m_eur:
+            valor = m_eur.group(1).replace('.', '').replace(',', '.')
+            eur = float(valor)
+        
+        # Buscar fecha - formato: "Miércoles, 25 Marzo 2026"
+        m_fecha = re.search(r'([LlMmJjVvSsDd][aáeéiíoóuúñAÁEÉIÍOÓUÚÑ]+,?\s*\d{1,2}\s+[A-Za-záéíóúñÁÉÍÓÚÑ]+\s+\d{4})', html)
+        if m_fecha:
+            fecha = m_fecha.group(1)
         
         print(f"USD: {usd}, EUR: {eur}, Fecha: {fecha}")
     except Exception as e:
