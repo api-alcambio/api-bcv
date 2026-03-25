@@ -29,16 +29,15 @@ def extraer():
         # Ejemplo: 462,66870000
         patron_numero = r'(\d{1,3}(?:\.\d{3})*,\d+)'
         
-        # Buscar USD - usualmente aparece junto a "DÓLAR" o en el bloque del dólar
+        # Buscar USD
         m_usd = re.search(r'USD[^>]*>.*?' + patron_numero, html, re.IGNORECASE | re.DOTALL)
         if not m_usd:
-            # Intentar buscando por la palabra Dólar
             m_usd = re.search(r'D[oó]lar[^<]*</[^>]*>.*?' + patron_numero, html, re.IGNORECASE | re.DOTALL)
         if m_usd:
             valor = m_usd.group(1).replace('.', '').replace(',', '.')
             usd = float(valor)
         
-        # Buscar EUR - Euro
+        # Buscar EUR
         m_eur = re.search(r'EUR[^>]*>.*?' + patron_numero, html, re.IGNORECASE | re.DOTALL)
         if not m_eur:
             m_eur = re.search(r'Euro[^<]*</[^>]*>.*?' + patron_numero, html, re.IGNORECASE | re.DOTALL)
@@ -46,10 +45,10 @@ def extraer():
             valor = m_eur.group(1).replace('.', '').replace(',', '.')
             eur = float(valor)
         
-        # Buscar fecha - formato: "Miércoles, 25 Marzo 2026"
-        m_fecha = re.search(r'([LlMmJjVvSsDd][aáeéiíoóuúñAÁEÉIÍOÓUÚÑ]+,?\s*\d{1,2}\s+[A-Za-záéíóúñÁÉÍÓÚÑ]+\s+\d{4})', html)
+        # Buscar fecha - está después de "Fecha Valor:"
+        m_fecha = re.search(r'Fecha Valor:\s*<span[^>]*>([^<]+)</span>', html, re.IGNORECASE)
         if m_fecha:
-            fecha = m_fecha.group(1)
+            fecha = m_fecha.group(1).strip()
         
         print(f"USD: {usd}, EUR: {eur}, Fecha: {fecha}")
     except Exception as e:
